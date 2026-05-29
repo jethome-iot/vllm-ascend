@@ -1,0 +1,39 @@
+name: jh lint
+
+# Schema/non-goals lint per SP-0a A0a.10. Runs on PR + push to jh/main / jh/qwen36-310p.
+
+on:
+  pull_request:
+    branches:
+      - jh/main
+      - jh/qwen36-310p
+  push:
+    branches:
+      - jh/main
+      - jh/qwen36-310p
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Schema + non-goals
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          fetch-tags: true
+
+      - name: Make scripts executable
+        run: |
+          chmod +x scripts/lint-decisions.sh
+          chmod +x scripts/lint-sp0a-non-goals.sh
+
+      - name: Lint decisions schema
+        run: ./scripts/lint-decisions.sh
+
+      - name: Lint SP-0a non-goals
+        run: ./scripts/lint-sp0a-non-goals.sh
