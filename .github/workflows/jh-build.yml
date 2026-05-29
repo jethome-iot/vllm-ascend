@@ -1,0 +1,97 @@
+name: jh build
+
+# Build vllm-ascend image для нашего форка.
+# SP-0a A0a.10. Targets self-hosted ARM64 runner (Harbor network access required).
+#
+# References:
+# - huawei-ascend/docs/plans/sub/SP-0a-bootstrap-infra.md v3 A0a.10
+# - Base image: quay.io/ascend/vllm-ascend:v0.19.1rc1-310p
+# - Push target: ${{ secrets.CR_HOST }}/vllm-ascend (Harbor)
+
+on:
+  push:
+    branches:
+      - jh/main
+  workflow_dispatch:
+    inputs:
+      tag_suffix:
+        description: 'Optional tag suffix (default: jh-<sha>)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build + push image (Harbor)
+    # Self-hosted required для Harbor network access (вместо GitHub-hosted Azure ARM64)
+    runs-on:
+      - self-hosted
+      - ubuntu-24.04-arm
+    env:
+      IMAGE_NAME: vllm-ascend
+      BASE_IMAGE: quay.io/ascend/vllm-ascend:v0.19.1rc1-310p
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          fetch-tags: true
+
+      - name: Login to Harbor
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.CR_HOST }}
+          username: ${{ secrets.CR_USER }}
+          password: ${{ secrets.CR_TOKEN }}
+
+      - name: Lint decisions (precondition)
+        run: |
+          chmod +x scripts/lint-decisions.sh
+          ./scripts/lint-decisions.sh
+
+      - name: Lint SP-0a non-goals (precondition)
+        run: |
+          chmod +x scripts/lint-sp0a-non-goals.sh
+          ./scripts/lint-sp0a-non-goals.sh
+
+      - name: Compute tags
+        id: tags
+        run: |
+          SHA="${{ github.sha }}"
+          SUFFIX="${{ github.event.inputs.tag_suffix }}"
+          if [ -n "$SUFFIX" ]; then
+            TAG="jh-${SUFFIX}-${SHA:0:10}"
+          else
+            TAG="jh-${SHA:0:10}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Computed tag: $TAG"
+
+      - name: Resolve base image digest (pinning)
+        id: base
+        run: |
+          docker pull ${{ env.BASE_IMAGE }}
+          DIGEST=$(docker inspect ${{ env.BASE_IMAGE }} --format '{{.Id}}')
+          echo "base_digest=$DIGEST" >> $GITHUB_OUTPUT
+          echo "Base image digest: $DIGEST" >> $GITHUB_STEP_SUMMARY
+
+      - name: Build image (native ARM64)
+        run: |
+          # Note: native build on ARM64 runner (no QEMU cross-compile)
+          # При наличии Dockerfile.jh — переключиться на него; пока baseline Docker pull через tag
+          docker tag ${{ env.BASE_IMAGE }} ${{ secrets.CR_HOST }}/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.tag }}
+          docker tag ${{ env.BASE_IMAGE }} ${{ secrets.CR_HOST }}/${{ env.IMAGE_NAME }}:jh-stable
+
+      - name: Push to Harbor
+        run: |
+          docker push ${{ secrets.CR_HOST }}/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.tag }}
+          docker push ${{ secrets.CR_HOST }}/${{ env.IMAGE_NAME }}:jh-stable
+
+      - name: Record image digest
+        run: |
+          BUILT_DIGEST=$(docker inspect ${{ secrets.CR_HOST }}/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.tag }} --format '{{.Id}}')
+          echo "Built image digest: $BUILT_DIGEST" >> $GITHUB_STEP_SUMMARY
+          echo "Tagged as: ${{ steps.tags.outputs.tag }} + jh-stable" >> $GITHUB_STEP_SUMMARY
