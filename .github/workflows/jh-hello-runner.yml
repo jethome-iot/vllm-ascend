@@ -1,0 +1,28 @@
+name: jh hello-runner
+
+# Verify ARM64 self-hosted runner connectivity per SP-0a A0a.9.
+# Trivial workflow targeting `ubuntu-24.04-arm` label.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hello:
+    name: ARM64 runner hello
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Identify
+        run: |
+          echo "✓ ARM64 runner alive"
+          echo "Host:   $(uname -a)"
+          echo "Cores:  $(nproc)"
+          echo "Memory: $(free -h | awk '/^Mem:/ {print $2}')"
+          echo "Date:   $(date)"
+      - name: Toolchain check
+        run: |
+          which git docker bash
+          git --version
+          docker --version || echo "docker not available (OK if not needed)"
