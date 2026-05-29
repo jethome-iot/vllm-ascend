@@ -1,0 +1,54 @@
+name: jh runner introspect
+
+# Diagnostic: что доступно на self-hosted ARM64 runners.
+# Investigates docker availability after build failure 26664179580.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  introspect:
+    name: Runner inventory
+    runs-on:
+      - self-hosted
+      - ubuntu-24.04-arm
+    steps:
+      - name: Identify runner
+        run: |
+          echo "=== runner identity ==="
+          echo "RUNNER_NAME=${RUNNER_NAME:-<unset>}"
+          echo "Host: $(uname -a)"
+          echo "User: $(whoami)"
+          echo "HOME: $HOME"
+          echo "PWD: $PWD"
+          echo ""
+          echo "=== PATH ==="
+          echo "$PATH" | tr ':' '\n'
+          echo ""
+          echo "=== package managers ==="
+          which apt apt-get snap dpkg 2>&1 || true
+          echo ""
+          echo "=== docker investigate ==="
+          which docker 2>&1 || echo "docker NOT in PATH"
+          which docker-ce docker.io 2>&1 || true
+          ls -la /usr/bin/docker /usr/local/bin/docker /snap/bin/docker 2>&1 || true
+          systemctl is-active docker 2>&1 || true
+          docker --version 2>&1 || echo "docker --version failed"
+          echo ""
+          echo "=== find any docker binary ==="
+          find / -name 'docker' -type f -executable 2>/dev/null | head -10 || true
+          echo ""
+          echo "=== dpkg-installed docker packages ==="
+          dpkg -l 2>/dev/null | grep -i docker || echo "no docker packages installed"
+          echo ""
+          echo "=== snap packages ==="
+          snap list 2>&1 | head -20 || true
+          echo ""
+          echo "=== alternatives (podman, buildah, etc.) ==="
+          which podman buildah crun runc nerdctl ctr 2>&1 || true
+          echo ""
+          echo "=== installed runner version + labels ==="
+          cat /home/actions/actions-runner/.runner 2>/dev/null || cat .runner 2>/dev/null || echo "no runner config visible"
