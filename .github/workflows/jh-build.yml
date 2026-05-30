@@ -26,10 +26,9 @@ permissions:
 jobs:
   build:
     name: Build + push image (Harbor)
-    # Self-hosted required для Harbor network access (вместо GitHub-hosted Azure ARM64)
-    runs-on:
-      - self-hosted
-      - ubuntu-24.04-arm
+    # GitHub-hosted Azure ARM64 (free для public repos). Harbor должен быть publicly accessible.
+    # При необходимости switch на self-hosted с docker-capable runner (см. memory/jh-runner-ops.md).
+    runs-on: ubuntu-24.04-arm
     env:
       IMAGE_NAME: vllm-ascend
       BASE_IMAGE: quay.io/ascend/vllm-ascend:v0.19.1rc1-310p

@@ -19,6 +19,7 @@ permissions:
 jobs:
   lint:
     name: Schema + non-goals
+    # GH-hosted ARM64; не требует docker
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout
