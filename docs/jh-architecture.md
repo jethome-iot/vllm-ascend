@@ -28,13 +28,13 @@ For full design context see:
 | `upstream/main` | Read-only mirror of `vllm-project/vllm-ascend@main`. Synced via PR (no direct write). | enforce_admins=true; no force-push; no admin bypass |
 | `jh/main` | Our production branch. Periodically rebased on `v0.19.1rc1` / future tags. | 1 PR review required; admin override enabled (emergency); force-push admin only |
 | `jh/qwen36-310p` | Long-lived feature branch. Discrete sub-phase PRs merge here, then promoted to `jh/main`. | Inherits `jh/main` policy |
-| `jh/qwen36-310p/<sub-phase>-<desc>` | Short-lived feature branches per sub-phase (e.g., `A0a-foundational-docs`, `A2.1-cumsum-naive`). PR → `jh/qwen36-310p`. | None (working branches) |
+| `jh-feature/<sub-phase>-<desc>` | Short-lived feature branches per sub-phase (e.g., `A0a-foundational-docs`, `A2.1-cumsum-naive`). PR → `jh/main` (или `jh/qwen36-310p` для long-aggregation). **Note:** `jh-feature/` prefix (не `jh/qwen36-310p/...`) — git ref не позволяет file/directory coexistence (`jh/qwen36-310p` существует как ref). | None (working branches) |
 
 ### PR strategy (per user instruction 2026-05-30)
 
 **No direct pushes to protected branches.** Every significant chunk of work:
 
-1. Create feature branch: `jh/qwen36-310p/<sub-phase>-<short-desc>`
+1. Create feature branch: `jh-feature/<sub-phase>-<short-desc>` (per ref structure note above)
 2. Atomic commits on feature branch
 3. Internal PR → target branch (`jh/qwen36-310p` or `jh/main`)
 4. CI green + self-review (+ Codex/Detective review where applicable)
@@ -113,13 +113,27 @@ runbooks (switch procedure, recovery) in `docs/` after dry-run testing.
 Frozen tuple of versions all SP-0+ work builds against. Updated when a coordinated
 rebase happens (e.g., после A4 driver upgrade).
 
-### Build-time (from image `jh-stable` inspection)
+### Build-time (from image `cr.jethome.work/jethome-iot/vllm-ascend:jh-stable` inspection 2026-05-30)
 
-- CANN: *Pending A0a.11 image inspection*
-- torch_npu: *Pending A0a.11 image inspection*
-- vllm-ascend tag: `v0.19.1rc1` (commit `da421afad7192dac64e39ae1d32305d57344f3cf`)
-- Base ARM64 image digest: *Pending A0a.10 CI build summary*
-- fw version: *Pending SP-0b A0b watchdog (npu-smi info during runtime)*
+- OS: **Ubuntu 22.04.5 LTS** (Jammy Jellyfish)
+- **CANN: 8.5.1** (`/usr/local/Ascend/cann-8.5.1/`)
+- **torch: 2.9.0+cpu**
+- **torch_npu: 2.9.0**
+- **transformers: 5.5.3**
+- **vllm: 0.19.1+empty** (workspace install в image)
+- **vllm_ascend: 0.19.1rc1** (commit `da421afad7192dac64e39ae1d32305d57344f3cf`)
+- numpy: 1.26.4
+- **Our Harbor image digest:** `sha256:0c7122525de75...` (build run 26678454129, tag `jh-8824ce5dca` + `jh-stable`)
+- **Base ARM64 image digest:** quay.io/ascend/vllm-ascend:v0.19.1rc1-310p (re-tagged; jh-stable = base for SP-0a bootstrap; Dockerfile.jh customization SP-1+)
+
+### Host driver (from /usr/local/Ascend/driver/version.info on 10.183.1.25)
+
+- **Driver version: 26.0.rc1** (package_version + Version)
+- ascendhal: 7.35.23
+- Innerversion: V100R001C10SPC001B253
+- Compatible inner: V100R001C10..C25
+- fw compatible range: 6.4.0-6.4.99, 7.0.0-9.9.9
+- **fw runtime version:** *Pending SP-0b A0b watchdog (npu-smi info during runtime)*
 
 ### Decided separately (from external sources)
 
