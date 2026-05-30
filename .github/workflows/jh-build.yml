@@ -1,12 +1,12 @@
 name: jh build
 
 # Build vllm-ascend image для нашего форка.
-# SP-0a A0a.10. Targets self-hosted ARM64 runner (Harbor network access required).
+# SP-0a A0a.10.
 #
 # References:
 # - huawei-ascend/docs/plans/sub/SP-0a-bootstrap-infra.md v3 A0a.10
 # - Base image: quay.io/ascend/vllm-ascend:v0.19.1rc1-310p
-# - Push target: ${{ secrets.CR_HOST }}/vllm-ascend (Harbor)
+# - Push target: ${{ secrets.CR_HOST }}/jethome-iot/vllm-ascend (Harbor project: jethome-iot)
 
 on:
   push:
@@ -30,7 +30,7 @@ jobs:
     # При необходимости switch на self-hosted с docker-capable runner (см. memory/jh-runner-ops.md).
     runs-on: ubuntu-24.04-arm
     env:
-      IMAGE_NAME: vllm-ascend
+      IMAGE_NAME: jethome-iot/vllm-ascend
       BASE_IMAGE: quay.io/ascend/vllm-ascend:v0.19.1rc1-310p
     steps:
       - name: Checkout
