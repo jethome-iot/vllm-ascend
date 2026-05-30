@@ -1,7 +1,7 @@
 # Decision: SP-1 — rebase onto upstream + reduced scope
 
 **Date:** 2026-05-30
-**Status:** accepted
+**Status:** accepted (verified 2026-05-30 via Qwen3.5-9B end-to-end smoke)
 **Owner:** adeep
 **Affected sub-plans:** SP-1, SP-3 (deferred items)
 
@@ -112,3 +112,31 @@ Detail: `huawei-ascend/docs/investigations/2026-05-30-sp1-scope-shift.md`
 - Upstream PRs #7109, #7398, #7306, #9514
 - Backup tag `pre-rebase-2026-05-30` → commit `732f7f87`
 - Rebased jh/main HEAD: `a8658e9d`
+
+## Verification result (added 2026-05-30 after A1a.1)
+
+✅ Hypothesis confirmed: #7306 closed empirically by #9514 в нашем baseline+rebase.
+
+**Test setup:**
+- Image: `cr.jethome.work/jethome-iot/vllm-ascend:jh-stable` (post-rebase)
+- Model: Qwen3.5-9B FP16, TP=2 single-card (chip 0+1 NPU 6), eager mode, max_model_len=4096
+- Env: `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1` (см. gotcha note)
+
+**Result:**
+- Engine init: 71.1s
+- API server boot: ~30s after offline env vars
+- 3 smoke prompts passed (RU greeting, EN math, EN code) — все coherent, ~6 tok/s
+- Hybrid Mamba/GDN forward path stable (Triton/FLA prefill kernel)
+- KV cache: 12.35 GiB → 199,680 tokens, concurrency 125× for 4096
+
+**Gotcha discovered:** HuggingFace.co резолвится только в IPv6 на 10.183.1.25.
+Docker host networking имеет broken IPv6 routing → SSL handshake hang в structured_output
+init (calls `list_repo_files` → HF API). Solution: offline env vars in compose profile.
+См. `huawei-ascend/memory/hf-hub-ipv6-ssl-hang-gotcha.md`.
+
+**Outcome для A1a.2-A1a.4:**
+- A1a.2 → no-op (#7109 already in baseline, verified via successful Qwen3.5 runtime)
+- A1a.3 NPU UT → optional (PyTorch fallback works in production)
+- A1a.4 upstream-candidates → no patches от нас для submission
+
+См. `huawei-ascend/memory/sp1-a1a1-7306-empirically-closed.md` для подробного writeup.
