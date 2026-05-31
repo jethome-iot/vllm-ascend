@@ -206,7 +206,7 @@ def apply_sampling_constraints(
     logits: torch.Tensor,  # [num_tokens, vocab_size//tp_size]
     cu_num_draft_tokens: torch.Tensor,  # [batch_size]
     sampling_metadata: SamplingMetadata,
-    top_k,
+    top_k=None,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Process logits based on sampling metadata for distributed scenario.
 
