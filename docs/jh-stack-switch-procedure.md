@@ -64,7 +64,27 @@ ssh adeep@10.183.1.25 'until curl -s :1025/v1/models 2>/dev/null | grep -q qwen3
 # 5. Verify production smoke (1 prompt)
 ssh adeep@10.183.1.25 'curl -s :1025/v1/chat/completions -H "Content-Type: application/json" \
   -d "{\"model\":\"qwen3-32b\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":50}" | head -c 200'
+
+# 6. ⚠️ RESTORE open-webui (gotcha — см. ниже). vllm.sh stop / compose --profile stop
+#    гасит open-webui (тот же compose-проект /opt/vllm, no-profile, но stop его ловит).
+#    MindIE — отдельный проект, обратно его НЕ поднимает.
+ssh adeep@10.183.1.25 'cd /opt/vllm && sudo docker compose up -d open-webui'
+ssh adeep@10.183.1.25 'until [ "$(curl -s -o /dev/null -w %{http_code} http://localhost:8080/health)" = "200" ]; do sleep 5; done; echo "open-webui UP"'
+# Первый старт после recreate ~1-2 мин (грузит embedding all-MiniLM-L6-v2 в память). HTTP 000 в это окно — норма.
 ```
+
+## ⚠️ GOTCHA: open-webui гасится при остановке vllm-профиля
+
+`/opt/vllm/vllm.sh stop` (и `docker compose --profile <X> stop`) останавливают НЕ
+только vllm-контейнер, но и `open-webui` — он в том же compose-проекте `/opt/vllm`,
+и хотя объявлен без профиля (always-on), `stop` его всё равно ловит. Рестарт MindIE
+(`/opt/mindie/mindie.sh` — **отдельный** compose-проект) open-webui обратно НЕ
+поднимает.
+
+**Следствие:** после каждого цикла «vllm test → restore MindIE» open-webui остаётся
+stopped, UI на :8080 не отвечает. **Fix:** шаг 6 выше (всегда после restore MindIE).
+
+Обнаружено 2026-05-31 (SP-6 spike).
 
 ---
 
