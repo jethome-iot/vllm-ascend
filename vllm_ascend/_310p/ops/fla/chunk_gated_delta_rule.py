@@ -40,7 +40,12 @@ def _expand_qk_to_v_heads(x: torch.Tensor, num_v_heads: int) -> torch.Tensor:
 def _iter_seq_ranges(batch_size: int, seq_len: int, cu_seqlens: torch.Tensor | None) -> list[tuple[int, int, int]]:
     if cu_seqlens is None:
         return [(i, 0, seq_len) for i in range(batch_size)]
-    return [(i, int(cu_seqlens[i].item()), int(cu_seqlens[i + 1].item())) for i in range(len(cu_seqlens) - 1)]
+    # NOTE: a single ``.tolist()`` does ONE device->host copy instead of 2*(N-1) per-element
+    # ``.item()`` syncs. On 310P3 under TP=4 cross-card P2P each device->host sync can stall
+    # inside the NPU driver (the DMA shares the PHB path with cross-card P2P) -> RCU stall ->
+    # host hang. Collapsing the loop to one bulk copy minimises that exposure.
+    cu = cu_seqlens.tolist()
+    return [(i, int(cu[i]), int(cu[i + 1])) for i in range(len(cu) - 1)]
 
 
 def _normalize_chunk_inputs(
