@@ -38,6 +38,25 @@ from vllm_ascend._310p.ops.fla.fused_gdn_gating import fused_gdn_gating_pytorch
 from vllm_ascend.attention.utils import maybe_save_kv_layer_to_connector
 
 
+def _zero_states_without_initial(
+    initial_state: torch.Tensor,
+    has_initial_state: torch.Tensor,
+) -> torch.Tensor:
+    """Zero the rows of ``initial_state`` whose sequence has no initial state.
+
+    Equivalent to ``initial_state[~has_initial_state, ...] = 0`` but WITHOUT boolean-mask
+    index assignment. Boolean indexing lowers to ``aclnnNonzeroV2`` plus a device->host sync
+    (to learn the number of selected rows). On 310P3 under TP=4 cross-card P2P that op faults
+    on some chips and hangs on others: the worker stalls inside the NPU driver, which busy-spins
+    the CPU -> RCU stall -> the whole host hangs (only an iBMC reset recovers it).
+
+    A broadcasted multiply by the boolean mask (cast to the state dtype) produces the exact
+    same result with pure elementwise arithmetic - no nonzero, no host sync, no P2P stall.
+    """
+    keep = has_initial_state.to(initial_state.dtype).reshape(-1, *([1] * (initial_state.dim() - 1)))
+    return initial_state * keep
+
+
 def _l2norm(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
     return F.normalize(x.to(torch.float32), p=2, dim=-1, eps=eps).to(x.dtype)
 
@@ -261,7 +280,10 @@ class AscendGatedDeltaNetAttention310(GatedDeltaNetAttention):
             # 2.2: Process the remaining part
             if attn_metadata.num_prefills > 0:
                 initial_state = ssm_state[non_spec_state_indices_tensor].contiguous()
-                initial_state[~has_initial_state, ...] = 0
+                # NOTE: replaces ``initial_state[~has_initial_state, ...] = 0``, whose boolean
+                # index assignment lowers to aclnnNonzeroV2 and hangs the host under TP=4 on
+                # 310P3 (see _zero_states_without_initial). Nonzero-free multiply instead.
+                initial_state = _zero_states_without_initial(initial_state, has_initial_state)
                 (
                     core_attn_out_non_spec,
                     last_recurrent_state,
