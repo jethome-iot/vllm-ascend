@@ -576,6 +576,12 @@ class AscendModelSlimConfig(QuantizationConfig):
 
     def is_layer_skipped_ascend(self, prefix: str, fused_mapping: Mapping[str, list[str]] = MappingProxyType({})):
         # adapted from vllm.model_executor.layers.quantization.utils.quant_utils.is_layer_skipped
+        # Multimodal Qwen3.x checkpoints (e.g. Qwen3.6-27B) ship no vision weights, yet vLLM still
+        # instantiates the visual.* Linear modules. They are absent from quant_description, so the
+        # lookups below would raise KeyError. Treat them as unquantized (FLOAT), mirroring the
+        # fp16 path.
+        if prefix.startswith("visual") or ".visual." in prefix:
+            return True
         proj_name = prefix.split(".")[-1]
         if proj_name in fused_mapping:
             shard_prefixes = [
