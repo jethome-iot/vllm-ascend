@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 import torch
 
 from tests.ut.base import TestBase
-from vllm_ascend._310p.attention.attention_mask import AttentionMaskBuilder310
+from vllm_ascend._310p.attention.attention_mask import AttentionMaskBuilder310, _round_up_to_tile
 
 
 class TestAttentionMaskBuilder310(TestBase):
@@ -41,4 +41,25 @@ class TestAttentionMaskBuilder310(TestBase):
         attn_metadata.query_start_loc = torch.tensor([0, 1, 5])
         attn_metadata.seq_lens = torch.tensor([7, 4])
         attn_mask = self.attention_mask_builder.get_splitfuse_mask(attn_metadata, torch.device("cpu"))
-        self.assertEqual(attn_mask.shape, (1, self.max_seqlen // 16, 16, 16))
+        # Key dim is sized to the actual max context (max(seq_lens)=7 -> 1 NZ tile), not max_seqlen.
+        self.assertEqual(attn_mask.shape, (1, _round_up_to_tile(7) // 16, 16, 16))
+
+    def test_round_up_to_tile(self):
+        self.assertEqual(_round_up_to_tile(0), 16)
+        self.assertEqual(_round_up_to_tile(1), 16)
+        self.assertEqual(_round_up_to_tile(15), 16)
+        self.assertEqual(_round_up_to_tile(16), 16)
+        self.assertEqual(_round_up_to_tile(17), 32)
+
+    def test_splitfuse_additive_mask_matches_index_select(self):
+        # The direct [num_query_tokens, key_len] build must equal selecting rows `position`
+        # from the full causal mask (sliced to key_len) — same semantics, no O(max_seqlen^2) alloc.
+        device = torch.device("cpu")
+        n = 32
+        full = AttentionMaskBuilder310.gen_causal_additive_mask(n, device)
+        position = torch.tensor([0, 3, 7, 20, 31], dtype=torch.int32)
+        for key_len in (16, 32):
+            direct = AttentionMaskBuilder310._build_splitfuse_additive_mask(position, key_len, device)
+            expected = full.index_select(0, position.to(torch.int64))[:, :key_len]
+            self.assertEqual(direct.shape, (position.shape[0], key_len))
+            torch.testing.assert_close(direct, expected)
