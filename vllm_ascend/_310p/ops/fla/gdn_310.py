@@ -44,17 +44,19 @@ def _zero_states_without_initial(
 ) -> torch.Tensor:
     """Zero the rows of ``initial_state`` whose sequence has no initial state.
 
-    Equivalent to ``initial_state[~has_initial_state, ...] = 0`` but WITHOUT boolean-mask
-    index assignment. Boolean indexing lowers to ``aclnnNonzeroV2`` plus a device->host sync
-    (to learn the number of selected rows). On 310P3 under TP=4 cross-card P2P that op faults
-    on some chips and hangs on others: the worker stalls inside the NPU driver, which busy-spins
-    the CPU -> RCU stall -> the whole host hangs (only an iBMC reset recovers it).
+    Drop-in for ``initial_state[~has_initial_state, ...] = 0`` that avoids boolean-mask index
+    assignment. Boolean indexing lowers to ``aclnnNonzeroV2`` plus a device->host sync (to learn
+    the number of selected rows); on 310P3 under TP=4 cross-card P2P that op faults on some chips
+    and stalls on others -> the worker busy-spins inside the NPU driver -> RCU stall -> host hang
+    (only an iBMC reset recovers it).
 
-    A broadcasted multiply by the boolean mask (cast to the state dtype) produces the exact
-    same result with pure elementwise arithmetic - no nonzero, no host sync, no P2P stall.
+    ``torch.where`` keeps this pure-elementwise (no nonzero, no host sync). It is used instead of a
+    ``initial_state * mask`` multiply on purpose: ``where`` writes an exact 0 for masked rows even
+    when those rows contain NaN/Inf, matching the assignment semantics (``NaN * 0`` would leak NaN).
     """
-    keep = has_initial_state.to(initial_state.dtype).reshape(-1, *([1] * (initial_state.dim() - 1)))
-    return initial_state * keep
+    keep = has_initial_state.reshape(-1, *([1] * (initial_state.dim() - 1)))
+    zero = torch.zeros((), dtype=initial_state.dtype, device=initial_state.device)
+    return torch.where(keep, initial_state, zero)
 
 
 def _l2norm(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
@@ -282,7 +284,7 @@ class AscendGatedDeltaNetAttention310(GatedDeltaNetAttention):
                 initial_state = ssm_state[non_spec_state_indices_tensor].contiguous()
                 # NOTE: replaces ``initial_state[~has_initial_state, ...] = 0``, whose boolean
                 # index assignment lowers to aclnnNonzeroV2 and hangs the host under TP=4 on
-                # 310P3 (see _zero_states_without_initial). Nonzero-free multiply instead.
+                # 310P3 (see _zero_states_without_initial). Nonzero-free torch.where instead.
                 initial_state = _zero_states_without_initial(initial_state, has_initial_state)
                 (
                     core_attn_out_non_spec,
