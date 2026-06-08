@@ -208,3 +208,40 @@ class TestAscendAttentionBackendImpl310(TestBase):
         metadata.attn_state = AscendAttentionState.SpecDecoding
         with self.assertRaises(NotImplementedError):
             output = self.impl.forward_impl(query, key, value, None, metadata, output)
+
+
+class TestAscendAttentionMetadataBuilder310BuildAttnMask(TestBase):
+    def _make_builder(self):
+        # Bypass __init__ (needs a full VllmConfig); the override only touches
+        # self.attn_mask_builder and self.model_config.
+        builder = AscendAttentionMetadataBuilder310.__new__(AscendAttentionMetadataBuilder310)
+        builder.model_config = MagicMock()
+        builder.attn_mask_builder = MagicMock()
+        builder.attn_mask_builder.get_attention_mask.return_value = "mask"
+        return builder
+
+    def test_only_prefill_no_cache_gets_a_mask(self):
+        # Every state except PrefillNoCache must skip the dense mask on 310P.
+        builder = self._make_builder()
+        common = MagicMock()
+        seq_lens = torch.tensor([5, 9, 3])
+        for state in (
+            AscendAttentionState.DecodeOnly,
+            AscendAttentionState.ChunkedPrefill,
+            AscendAttentionState.PrefillCacheHit,
+            AscendAttentionState.SpecDecoding,
+        ):
+            self.assertIsNone(builder._build_attn_mask(state, seq_lens, common))
+        builder.attn_mask_builder.get_attention_mask.assert_not_called()
+
+    def test_prefill_no_cache_sizes_mask_by_actual_max_seqlen(self):
+        # PrefillNoCache builds a mask sized to the batch's actual max context, not max_model_len.
+        builder = self._make_builder()
+        common = MagicMock()
+        common.causal = True
+        seq_lens = torch.tensor([5, 9, 3])
+        result = builder._build_attn_mask(AscendAttentionState.PrefillNoCache, seq_lens, common)
+        self.assertEqual(result, "mask")
+        builder.attn_mask_builder.get_attention_mask.assert_called_once_with(
+            True, builder.model_config, actual_max_seqlen=9
+        )

@@ -22,7 +22,11 @@ from vllm.config import VllmConfig
 from vllm.v1.kv_cache_interface import AttentionSpec
 
 from vllm_ascend._310p.attention.attention_mask import AttentionMaskBuilder310
-from vllm_ascend.attention.attention_v1 import AscendAttentionMetadataBuilder
+from vllm_ascend.attention.attention_v1 import (
+    AscendAttentionMetadataBuilder,
+    AscendAttentionState,
+)
+from vllm_ascend.attention.utils import AscendCommonAttentionMetadata
 
 
 class AscendAttentionMetadataBuilder310(AscendAttentionMetadataBuilder):
@@ -56,3 +60,22 @@ class AscendAttentionMetadataBuilder310(AscendAttentionMetadataBuilder):
         # Override the mask builder with the 310P-specific version
         max_model_len = vllm_config.model_config.max_model_len
         self.attn_mask_builder: Any = AttentionMaskBuilder310(self.device, max_model_len)
+
+    def _build_attn_mask(
+        self,
+        attn_state: AscendAttentionState,
+        seq_lens: torch.Tensor,
+        common_attn_metadata: AscendCommonAttentionMetadata,
+    ) -> torch.Tensor | None:
+        # Only PrefillNoCache consumes the dense mask, sized to the actual batch length to avoid
+        # an O(max_model_len^2) OOM at long context. ChunkedPrefill builds the SplitFuse mask
+        # separately; DecodeOnly needs none.
+        if attn_state != AscendAttentionState.PrefillNoCache:
+            return None
+        # seq_lens is the CPU tensor prepared in build(), so .item() is a host read,
+        # not an NPU->host sync.
+        return self.attn_mask_builder.get_attention_mask(
+            common_attn_metadata.causal,
+            self.model_config,
+            actual_max_seqlen=int(seq_lens.max().item()),
+        )
