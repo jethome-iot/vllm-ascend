@@ -269,6 +269,16 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
     def reorder_batch(self, input_batch, scheduler_output: "SchedulerOutput") -> bool:
         return False
 
+    def _build_attn_mask(
+        self,
+        attn_state: AscendAttentionState,
+        seq_lens: torch.Tensor,
+        common_attn_metadata: AscendCommonAttentionMetadata,
+    ) -> torch.Tensor | None:
+        # Device-agnostic default: a single dense mask for every attention state.
+        # Device-specialized builders may override this (see the 310P subclass).
+        return self.attn_mask_builder.get_attention_mask(common_attn_metadata.causal, self.model_config)
+
     def build(
         self,
         common_prefix_len: int,
@@ -304,8 +314,9 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
 
         attn_state = common_attn_metadata.attn_state
 
-        # Get attn_mask from singleton AttentionMaskBuilder
-        attn_mask = self.attn_mask_builder.get_attention_mask(common_attn_metadata.causal, self.model_config)
+        # Get attn_mask via the builder hook (device-specialized subclasses may size it to the
+        # actual batch context / skip it per attn_state — see the 310P builder).
+        attn_mask = self._build_attn_mask(attn_state, seq_lens, common_attn_metadata)
 
         # TODO: Yet another unnecessary H2D while we already have a query_start_loc on device
         query_start_loc = query_start_loc_cpu.pin_memory().to(self.device, non_blocking=True)

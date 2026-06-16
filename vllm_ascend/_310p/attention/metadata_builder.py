@@ -101,6 +101,34 @@ class AscendAttentionMetadataBuilder310(AscendAttentionMetadataBuilder):
         )
         return buffer[:num_reqs]
 
+    def _build_attn_mask(
+        self,
+        attn_state: AscendAttentionState,
+        seq_lens: torch.Tensor,
+        common_attn_metadata: AscendCommonAttentionMetadata,
+    ) -> torch.Tensor | None:
+        # Only PrefillNoCache consumes the dense mask, sized to the actual batch length to avoid
+        # an O(max_model_len^2) OOM at long context (e.g. 131K -> tens of GiB fp16, observed on
+        # 310P TP=4). ChunkedPrefill / SpecDecoding build the SplitFuse mask in the forward path
+        # (get_splitfuse_mask); DecodeOnly needs no mask.
+        if attn_state != AscendAttentionState.PrefillNoCache:
+            return None
+        # seq_lens is the CPU tensor prepared in the base build(), so these are host reads,
+        # not NPU->host syncs.
+        seq_lens_list = seq_lens.tolist()
+        # forward_prefill_310 folds alignment padding into the LAST request's length:
+        #   delta = num_actual_tokens - sum(seq_lens); seq_len[-1] += delta
+        # The dense mask must cover that inflated last sequence, so size it to the largest
+        # effective per-request length, not the raw seq_lens.max() (which can under-size the
+        # mask and mis-mask / fault the flash-attention op when padding is present).
+        delta = int(common_attn_metadata.num_actual_tokens) - sum(seq_lens_list)
+        effective_max_seqlen = max(max(seq_lens_list), seq_lens_list[-1] + delta)
+        return self.attn_mask_builder.get_attention_mask(
+            common_attn_metadata.causal,
+            self.model_config,
+            actual_max_seqlen=effective_max_seqlen,
+        )
+
     def build(
         self,
         common_prefix_len: int,
