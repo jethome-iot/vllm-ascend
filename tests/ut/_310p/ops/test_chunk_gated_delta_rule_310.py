@@ -1,6 +1,15 @@
 import torch
 
-from vllm_ascend._310p.ops.fla.chunk_gated_delta_rule import chunk_gated_delta_rule_pytorch
+from vllm_ascend._310p.ops.fla.chunk_gated_delta_rule import _iter_seq_ranges, chunk_gated_delta_rule_pytorch
+
+
+def test_iter_seq_ranges_varlen_uses_cu_seqlens():
+    cu_seqlens = torch.tensor([0, 2, 5, 9])
+    assert _iter_seq_ranges(1, 9, cu_seqlens) == [(0, 0, 2), (1, 2, 5), (2, 5, 9)]
+
+
+def test_iter_seq_ranges_none_uses_batch_and_seq_len():
+    assert _iter_seq_ranges(3, 7, None) == [(0, 0, 7), (1, 0, 7), (2, 0, 7)]
 
 
 def test_chunk_gated_delta_rule_310_output_shape_and_dtype():
